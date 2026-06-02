@@ -1,42 +1,43 @@
-import pygame
-import sys
+import tkinter as tk
 import random
 
-# Initialize Pygame
-pygame.init()
-
-# --- MOBILE COMPATIBILITY & SCALING ---
-# Standard internal resolution (16:9 aspect ratio)
+# --- CONFIGURATION & SCALING ---
 BASE_WIDTH, BASE_HEIGHT = 1280, 720
 
-# Get actual device screen info (adapts to mobile screens)
-screen_info = pygame.display.Info()
-SCREEN_WIDTH = screen_info.current_w if screen_info.current_w > 0 else BASE_WIDTH
-SCREEN_HEIGHT = screen_info.current_h if screen_info.current_h > 0 else BASE_HEIGHT
+root = tk.Tk()
+root.title("Geometry Dash Python Clone (Tkinter)")
 
-# Scale factors to ensure everything fits perfectly on any screen
+# Force fullscreen for mobile-like scaling
+root.attributes("-fullscreen", True)
+SCREEN_WIDTH = root.winfo_screenwidth()
+SCREEN_HEIGHT = root.winfo_screenheight()
+
+# Fallback if window dimensions aren't fetched instantly
+if SCREEN_WIDTH <= 0: SCREEN_WIDTH = BASE_WIDTH
+if SCREEN_HEIGHT <= 0: SCREEN_HEIGHT = BASE_HEIGHT
+
+# Scale factors 
 SF_X = SCREEN_WIDTH / BASE_WIDTH
 SF_Y = SCREEN_HEIGHT / BASE_HEIGHT
 
-screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.FULLSCREEN | pygame.SCALED)
-pygame.display.set_caption("Geometry Dash Python Clone")
-clock = pygame.time.Clock()
+# Canvas configuration
+canvas = tk.Canvas(root, width=SCREEN_WIDTH, height=SCREEN_HEIGHT, bg="#140a28", highlightthickness=0)
+canvas.pack(fill="both", expand=True)
 
-# --- GAME CONSTANTS (Scaled) ---
-GRAVITY = 0.8 * SF_Y
-JUMP_STRENGTH = -14 * SF_Y
+# --- GAME CONSTANTS ---
+GRAVITY = 0.7 * SF_Y
+JUMP_STRENGTH = -13.5 * SF_Y
 SPEED = 8 * SF_X
 FLOOR_Y = SCREEN_HEIGHT - (120 * SF_Y)
 
-# Colors
-BG_COLORS = [(20, 10, 40), (10, 40, 20), (40, 10, 10), (30, 30, 10), (10, 30, 30),
-             (30, 10, 30), (20, 20, 20), (0, 40, 50), (50, 0, 40), (20, 50, 10)]
-BLOCK_COLOR = (0, 200, 255)
-SPIKE_COLOR = (255, 50, 50)
-PORTAL_COLOR = (255, 200, 0)
+BG_COLORS = ["#140a28", "#0a2814", "#280a0a", "#1e1e0a", "#0a1e1e",
+             #6       #7       #8       #9       #10
+             "#1e0a1e", "#141414", "#002832", "#320028", "#14320a"]
+BLOCK_COLOR = "#00c8ff"
+SPIKE_COLOR = "#ff3232"
+PORTAL_COLOR = "#ffc800"
 
 # --- 10 LEVEL DESIGN DATA ---
-# 'b' = Block, 's' = Spike, 'p' = Win Portal. Numbers dictate X-grid position (multiplied by 60px)
 LEVELS = {
     1: [('s', 10), ('s', 15), ('b', 18), ('s', 22), ('s', 23), ('b', 28), ('b', 29), ('s', 35), ('p', 42)],
     2: [('b', 8), ('s', 12), ('s', 13), ('b', 18), ('b', 19), ('s', 20), ('s', 25), ('b', 30), ('p', 38)],
@@ -57,94 +58,80 @@ class Player:
         self.y = FLOOR_Y - self.size
         self.vel_y = 0
         self.is_grounded = True
-        self.rotation = 0
-        self.rect = pygame.Rect(self.x, self.y, self.size, self.size)
 
     def update(self, jump_intent):
-        # Apply Gravity
         self.vel_y += GRAVITY
         self.y += self.vel_y
         self.is_grounded = False
 
-        # Floor Collision
         if self.y >= FLOOR_Y - self.size:
             self.y = FLOOR_Y - self.size
             self.vel_y = 0
             self.is_grounded = True
 
-        # Handle Jump (Triggers on Screen Tap / Click / Space)
         if jump_intent and self.is_grounded:
             self.vel_y = JUMP_STRENGTH
             self.is_grounded = False
 
-        # Update Rect position
-        self.rect.y = self.y
-
-        # Rotation effect based on jumping
-        if not self.is_grounded:
-            self.rotation += 5
-        else:
-            # Snap to nearest 90 degrees when landing smoothly
-            self.rotation = round(self.rotation / 90) * 90
-
-    def draw(self, surface):
-        # Draw a sleek neon square with rotation
-        pygame_surface = pygame.Surface((self.size, self.size), pygame.SRCALPHA)
-        pygame.draw.rect(pygame_surface, (0, 255, 150), (0, 0, self.size, self.size), border_radius=int(6 * SF_Y))
-        pygame.draw.rect(pygame_surface, (255, 255, 255), (0, 0, self.size, self.size), int(4 * SF_Y), border_radius=int(6 * SF_Y))
-        
-        rotated_surface = pygame.transform.rotate(pygame_surface, -self.rotation)
-        new_rect = rotated_surface.get_rect(center=(self.x + self.size/2, self.y + self.size/2))
-        surface.blit(rotated_surface, new_rect.topleft)
+    def get_coords(self):
+        return self.x, self.y, self.x + self.size, self.y + self.size
 
 class Game:
     def __init__(self):
         self.current_level = 1
-        self.score = 0
-        self.font = pygame.font.Font(None, int(40 * SF_Y))
+        self.jump_intent = False
         self.reset_level()
+        
+        # Key/Touch Bindings
+        root.bind("<space>", lambda e: self.trigger_jump())
+        root.bind("<Up>", lambda e: self.trigger_jump())
+        root.bind("<Button-1>", lambda e: self.trigger_jump()) # Universal touch screen / mouse tap
+        root.bind("<Escape>", lambda e: root.destroy())
+
+    def trigger_jump(self):
+        self.jump_intent = True
 
     def reset_level(self):
         self.player = Player()
         self.obstacles = []
         self.particles = []
         self.camera_x = 0
-        self.state = "PLAYING" # PLAYING, WIN, GAME_OVER
+        self.state = "PLAYING"
         
-        # Build the level based on data
         grid_size = 60 * SF_X
         level_data = LEVELS[self.current_level]
         
         for obs_type, grid_x in level_data:
             real_x = grid_x * grid_size + 800 * SF_X
-            if obs_type == 'b': # Block
-                rect = pygame.Rect(real_x, FLOOR_Y - grid_size, grid_size, grid_size)
-                self.obstacles.append({'type': 'block', 'rect': rect})
-            elif obs_type == 's': # Spike
-                rect = pygame.Rect(real_x, FLOOR_Y - grid_size, grid_size, grid_size)
-                self.obstacles.append({'type': 'spike', 'rect': rect})
-            elif obs_type == 'p': # Win Portal
-                rect = pygame.Rect(real_x, FLOOR_Y - (grid_size * 2), grid_size, grid_size * 2)
-                self.obstacles.append({'type': 'portal', 'rect': rect})
+            if obs_type == 'b':
+                self.obstacles.append({'type': 'block', 'x1': real_x, 'y1': FLOOR_Y - grid_size, 'x2': real_x + grid_size, 'y2': FLOOR_Y})
+            elif obs_type == 's':
+                self.obstacles.append({'type': 'spike', 'x1': real_x, 'y1': FLOOR_Y - grid_size, 'x2': real_x + grid_size, 'y2': FLOOR_Y})
+            elif obs_type == 'p':
+                self.obstacles.append({'type': 'portal', 'x1': real_x, 'y1': FLOOR_Y - (grid_size * 2), 'x2': real_x + grid_size, 'y2': FLOOR_Y})
 
     def spawn_particles(self):
-        if self.player.is_grounded:
-            if random.random() < 0.4:
-                self.particles.append({
-                    'x': self.player.x,
-                    'y': FLOOR_Y,
-                    'vx': -SPEED * 0.5,
-                    'vy': -random.random() * 3,
-                    'life': 15
-                })
+        if self.player.is_grounded and random.random() < 0.4:
+            self.particles.append({
+                'x': self.player.x,
+                'y': FLOOR_Y,
+                'vx': -SPEED * 0.5,
+                'vy': -random.random() * 3,
+                'life': 15
+            })
 
-    def update(self, jump_intent):
+    def check_collision(self, px1, py1, px2, py2, ox1, oy1, ox2, oy2):
+        # AABB Overlap bounding box check
+        return not (px2 < ox1 or px1 > ox2 or py2 < oy1 or py1 > oy2)
+
+    def game_loop(self):
         if self.state == "PLAYING":
             self.camera_x += SPEED
-            self.player.update(jump_intent)
+            self.player.update(self.jump_intent)
             self.spawn_particles()
+            self.jump_intent = False # Reset intent after registering
 
-            # Update particles
+            # Handle particles
             for p in self.particles[:]:
                 p['x'] += p['vx']
                 p['y'] += p['vy']
@@ -152,113 +139,82 @@ class Game:
                 if p['life'] <= 0:
                     self.particles.remove(p)
 
-            # Check Collisions
-            player_rect = self.player.rect
+            # Process Obstacles and Overlaps
+            px1, py1, px2, py2 = self.player.get_coords()
+            
             for obs in self.obstacles:
-                # Shift obstacle relative to moving camera
-                shifted_rect = obs['rect'].move(-self.camera_x, 0)
-                
-                if player_rect.colliderect(shifted_rect):
+                ox1 = obs['x1'] - self.camera_x
+                ox2 = obs['x2'] - self.camera_x
+                oy1 = obs['y1']
+                oy2 = obs['y2']
+
+                if self.check_collision(px1, py1, px2, py2, ox1, oy1, ox2, oy2):
                     if obs['type'] == 'spike':
                         self.state = "GAME_OVER"
-                    elif obs['type'] == 'block':
-                        # If colliding from above, land on block
-                        if player_rect.bottom <= shifted_rect.top + (15 * SF_Y) and self.player.vel_y >= 0:
-                            self.player.y = obs['rect'].top - self.player.size
-                            self.player.vel_y = 0
-                            self.player.is_grounded = True
-                        else: # Crashed into the side of a block
-                            self.state = "GAME_OVER"
                     elif obs['type'] == 'portal':
                         self.state = "WIN"
+                    elif obs['type'] == 'block':
+                        # Top physics landing landing zone check
+                        if py2 <= oy1 + (15 * SF_Y) and self.player.vel_y >= 0:
+                            self.player.y = oy1 - self.player.size
+                            self.player.vel_y = 0
+                            self.player.is_grounded = True
+                        else:
+                            self.state = "GAME_OVER"
 
-        elif jump_intent: # Tap screen to restart or advance
+        elif self.jump_intent:
+            self.jump_intent = False
             if self.state == "GAME_OVER":
                 self.reset_level()
             elif self.state == "WIN":
-                if self.current_level < 10:
-                    self.current_level += 1
-                    self.reset_level()
-                else:
-                    self.current_level = 1 # Loop back to 1
-                    self.reset_level()
+                self.current_level = self.current_level + 1 if self.current_level < 10 else 1
+                self.reset_level()
+
+        self.draw()
+        # Schedule the next frame (~60 FPS)
+        root.after(16, self.game_loop)
 
     def draw(self):
-        # Dynamic BG Color matching the level
-        screen.fill(BG_COLORS[self.current_level - 1])
+        canvas.delete("all")
+        
+        # Background Uniform fill
+        canvas.configure(bg=BG_COLORS[self.current_level - 1])
 
-        # Draw Floor Line
-        pygame.draw.line(screen, (255, 255, 255), (0, FLOOR_Y), (SCREEN_WIDTH, FLOOR_Y), int(4 * SF_Y))
-        pygame.draw.rect(screen, (10, 10, 15), (0, FLOOR_Y, SCREEN_WIDTH, SCREEN_HEIGHT - FLOOR_Y))
+        # Floor Draw
+        canvas.create_rectangle(0, FLOOR_Y, SCREEN_WIDTH, SCREEN_HEIGHT, fill="#0a0a0f", outline="")
+        canvas.create_line(0, FLOOR_Y, SCREEN_WIDTH, FLOOR_Y, fill="white", width=int(3 * SF_Y))
 
-        # Draw Particles
+        # Particles Draw
         for p in self.particles:
-            pygame.draw.circle(screen, (0, 255, 150), (int(p['x']), int(p['y'])), int(random.randint(2, 5) * SF_Y))
+            r = int(random.randint(2, 4) * SF_Y)
+            canvas.create_oval(p['x']-r, p['y']-r, p['x']+r, p['y']+r, fill="#00ff96", outline="")
 
-        # Draw Obstacles
+        # Obstacles Render Viewport optimization
         for obs in self.obstacles:
-            shifted_rect = obs['rect'].move(-self.camera_x, 0)
-            # Only render if visible on screen
-            if -shifted_rect.width < shifted_rect.x < SCREEN_WIDTH:
+            ox1 = obs['x1'] - self.camera_x
+            ox2 = obs['x2'] - self.camera_x
+            if -100 < ox2 and ox1 < SCREEN_WIDTH + 100:
                 if obs['type'] == 'block':
-                    pygame.draw.rect(screen, BLOCK_COLOR, shifted_rect, border_radius=int(4 * SF_Y))
-                    pygame.draw.rect(screen, (255, 255, 255), shifted_rect, int(2 * SF_Y), border_radius=int(4 * SF_Y))
+                    canvas.create_rectangle(ox1, obs['y1'], ox2, obs['y2'], fill=BLOCK_COLOR, outline="white", width=2)
                 elif obs['type'] == 'spike':
-                    pts = [
-                        (shifted_rect.midtop),
-                        (shifted_rect.bottomleft),
-                        (shifted_rect.bottomright)
-                    ]
-                    pygame.draw.polygon(screen, SPIKE_COLOR, pts)
-                    pygame.draw.polygon(screen, (255, 255, 255), pts, int(2 * SF_Y))
+                    canvas.create_polygon(ox1, obs['y2'], (ox1+ox2)/2, obs['y1'], ox2, obs['y2'], fill=SPIKE_COLOR, outline="white", width=2)
                 elif obs['type'] == 'portal':
-                    pygame.draw.ellipse(screen, PORTAL_COLOR, shifted_rect)
-                    pygame.draw.ellipse(screen, (255, 255, 255), shifted_rect, int(3 * SF_Y))
+                    canvas.create_oval(ox1, obs['y1'], ox2, obs['y2'], fill=PORTAL_COLOR, outline="white", width=3)
 
-        # Draw Player
-        self.player.draw(screen)
+        # Player Graphic Render
+        px1, py1, px2, py2 = self.player.get_coords()
+        canvas.create_rectangle(px1, py1, px2, py2, fill="#00ff96", outline="white", width=int(4 * SF_Y))
 
-        # UI Text Overlays
-        lvl_txt = self.font.render(f"LEVEL {self.current_level}/10", True, (255, 255, 255))
-        screen.blit(lvl_txt, (20 * SF_X, 20 * SF_Y))
+        # UI Overlay Data
+        canvas.create_text(20 * SF_X, 20 * SF_Y, text=f"LEVEL {self.current_level}/10", fill="white", font=("Arial", int(24 * SF_Y), "bold"), anchor="nw")
 
         if self.state == "GAME_OVER":
-            over_txt = self.font.render("CRASHED! Tap Screen to Retry", True, (255, 50, 50))
-            text_rect = over_txt.get_rect(center=(SCREEN_WIDTH/2, SCREEN_HEIGHT/2))
-            screen.blit(over_txt, text_rect)
+            canvas.create_text(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, text="CRASHED! Tap Screen to Retry", fill="#ff3232", font=("Arial", int(28 * SF_Y), "bold"), justify="center")
         elif self.state == "WIN":
-            win_msg = "ALL LEVELS CLEARED!" if self.current_level == 10 else "LEVEL PASSED! Tap to Continue"
-            win_txt = self.font.render(win_msg, True, (50, 255, 50))
-            text_rect = win_txt.get_rect(center=(SCREEN_WIDTH/2, SCREEN_HEIGHT/2))
-            screen.blit(win_txt, text_rect)
+            msg = "ALL LEVELS CLEARED!" if self.current_level == 10 else "LEVEL PASSED! Tap to Continue"
+            canvas.create_text(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, text=msg, fill="#32ff32", font=("Arial", int(28 * SF_Y), "bold"), justify="center")
 
-# --- MAIN GAME LOOP ---
+# --- INITIALIZE EXECUTION ---
 game = Game()
-running = True
-
-while running:
-    jump_intent = False
-    
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
-        
-        # KEYBOARD CONTROL (For desktop testing)
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_SPACE or event.key == pygame.K_UP:
-                jump_intent = True
-            if event.key == pygame.K_ESCAPE:
-                running = False
-                
-        # MOBILE COMPATIBILITY: Screen tap triggers a jump or event selection
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            jump_intent = True
-
-    game.update(jump_intent)
-    game.draw()
-    
-    pygame.display.flip()
-    clock.tick(60) # Locked 60 FPS frame rate
-
-pygame.quit()
-sys.exit()
+root.after(16, game.game_loop)
+root.mainloop()
